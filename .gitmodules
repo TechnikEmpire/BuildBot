@@ -1,0 +1,3 @@
+[submodule "BuildBotCore"]
+	path = BuildBotCore
+	url = https://github.com/TechnikEmpire/BuildBotCore.git
