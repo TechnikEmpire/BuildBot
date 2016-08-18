@@ -1,7 +1,7 @@
 # BuildBot
 Cross platform, simple build system in pure C# based on .NET core app &amp; standard library.
 
-The purpose of this small, portable application is to enable .NET developers to use any .NET language not only to write their software, but to write the build scripts for their software in the same language that their software is built in. Note however that you're not constrained to only building .NET software with this utility, you can build anything because you have the power of a fully featured software platform at your disposal. In summary:
+The purpose of this small, portable application is to enable C# developers to use any C# not only to write their software, but to write the build scripts for their software in the same language that their software is built in. Note however that you're not constrained to only building .NET software with this utility, you can build anything because you have the power of a fully featured software platform at your disposal. In summary:
 
 - Strongly typed code vs script.  
 - Compile time error checking vs runtime trial and error.  
