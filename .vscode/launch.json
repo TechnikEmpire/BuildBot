@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "Build Debug",
+            "program": "${workspaceRoot}/BuildBot/bin/Debug/BuildBot.dll",
+            "args": [],
+            "cwd": "${workspaceRoot}/BuildBot",
+            "stopAtEntry": false,
+            "externalConsole": false
+        },
+        {
+            "name": "Release",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "Build Release",
+            "program": "${workspaceRoot}/BuildBot/bin/Release/BuildBot.dll",
+            "args": [],
+            "cwd": "${workspaceRoot}/BuildBot",
+            "stopAtEntry": false,
+            "externalConsole": false
+        },
+        {
+            "name": ".NET Core Attach",
+            "type": "coreclr",
+            "request": "attach",
+            "processId": "${command.pickProcess}"
+        }
+    ]
+}
