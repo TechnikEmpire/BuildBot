@@ -136,7 +136,7 @@ namespace BuildBot
                 // Build correct base project directory.
                 var fullProjectPath = Path.GetFullPath(options.ProjectDirectory).ConvertToHostOsPath();
 
-                if(fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
+                if(!fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
                 {
                     Console.WriteLine("Unrooted project path supplied.");
                     fullProjectDirectory = (Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + options.ProjectDirectory);
@@ -147,9 +147,8 @@ namespace BuildBot
                     fullProjectDirectory = options.ProjectDirectory.ConvertToHostOsPath();
                 }
 
+                // Ensure path is full/abs.
                 fullProjectDirectory = Path.GetFullPath(options.ProjectDirectory).ConvertToHostOsPath();
-
-                //fullProjectDirectory = fullProjectDirectory.ConvertToHostOsPath();
 
                 Console.WriteLine(string.Format("Base project directory: {0}", fullProjectDirectory));
             }
