@@ -10,59 +10,198 @@ using System.Runtime.Loader;
 using BuildBotCore;
 using System.Runtime.Versioning;
 using System.Linq;
+using CommandLine;
+using System.Text.RegularExpressions;
+using BuildBot.Extensions;
 
 namespace BuildBot
 {
 
+    /// <summary>
+    /// Defines exit codes for the application. 
+    /// </summary>
+    public enum ExitCodes : int
+    {
+        /// <summary>
+        /// No errors. Build scripts were found, and all were compiled and
+        /// executed without issue.
+        /// </summary>
+        Success = 0,
+        
+        /// <summary>
+        /// Invald arguments were supplied to BuildBot.
+        /// </summary>
+        InvalidArguments,
+
+        /// <summary>
+        /// Could not locate any build scripts.
+        /// </summary>
+        NoBuildScriptsFound,
+
+        /// <summary>
+        /// An error occurred when attempting to compile a build script.
+        /// </summary>
+        ScriptCompilationFailure,
+
+        /// <summary>
+        /// An error occurred when attempting to execute a build script.
+        /// </summary>
+        ScriptExecutionError
+    }
+
+    /// <summary>
+    /// Defines optional and required command line arguments for BuildBot.
+    /// </summary>
+    public class BuildBotOptions
+    {
+
+        [Option('C', "Config", Separator = ',', Required = true,
+        HelpText = "The build configuration. Valid values are \"Debug\" and \"Release\". Multiple values can be supplied in a list, separated by the ',' character.")]
+        public IList<BuildConfiguration> Configuration
+        {
+            get;
+            set;
+        }
+
+        [Option('A', "Arch", Separator = ',', Required = true,
+        HelpText = "The target architecture. Valid values are \"x86\" and \"x64\". Multiple values can be supplied in a list, separated by the ',' character.")]
+        public IList<Architecture> Arch
+        {
+            get;
+            set;
+        }
+
+        [Option('D', "ProjectDir", Required = true,
+        HelpText = "The project directory to initiate building from. This is the base directory that will be recursively scanned for .buildbot script directories.")]
+        public string ProjectDirectory
+        {
+            get;
+            set;
+        }
+    }
+
+    /// <summary>
+    /// BuildBot main program class.
+    /// </summary>
     public class Program
     {
+        /// <summary>
+        /// Stores dynamically compiled, in-memory assemblies generated from
+        /// successful build script compilation.
+        /// </summary>
         private static List<MemoryStream> GeneratedAssemblies = new List<MemoryStream>();
 
+        /// <summary>
+        /// Main.
+        /// </summary>
+        /// <param name="args">
+        /// Supplied BuildBot arguments.
+        /// </param>
         public static void Main(string[] args)
         {
-            foreach(var arg in args)
+            // Attempt to build out options. If this fails, just return. By
+            // using the default parser, help/usage will automatically get
+            // printed to the console.
+
+            BuildBotOptions options = null;
+
+            var parser = CommandLine.Parser.Default;
+            var result = parser.ParseArguments<BuildBotOptions>(args).WithParsed(
+               (opts =>
+               {
+                   options = opts;
+               })
+            );
+
+            // Full project dir. To be expanded out of options.
+            string fullProjectDirectory = string.Empty;
+
+            if (options != null)
             {
-                Console.WriteLine(arg);
+                WriteTitleToConsole("Specified Build Settings");
+
+                foreach (var entry in options.Configuration)
+                {
+                    Console.WriteLine(string.Format("Requested build configuration: {0}", entry));
+                }
+
+                foreach (var entry in options.Arch)
+                {
+                    Console.WriteLine(string.Format("Requested target arch: {0}", entry));
+                }
+
+                // Sanitize input project dir
+                options.ProjectDirectory = options.ProjectDirectory.ConvertToHostOsPath();
+
+                // Build correct base project directory.
+                var fullProjectPath = Path.GetFullPath(options.ProjectDirectory).ConvertToHostOsPath();
+
+                if(fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("Unrooted project path supplied.");
+                    fullProjectDirectory = (Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + options.ProjectDirectory);
+                }
+                else
+                {                    
+                    Console.WriteLine("Rooted project path supplied.");
+                    fullProjectDirectory = options.ProjectDirectory.ConvertToHostOsPath();
+                }
+
+                fullProjectDirectory = Path.GetFullPath(options.ProjectDirectory).ConvertToHostOsPath();
+
+                //fullProjectDirectory = fullProjectDirectory.ConvertToHostOsPath();
+
+                Console.WriteLine(string.Format("Base project directory: {0}", fullProjectDirectory));
             }
-
-            /*
-            var variables = Environment.GetEnvironmentVariables();
-
-            Console.WriteLine(string.Format("Num Variables: {0}", variables.Count));
-
-            foreach(var varName in variables.Keys)
+            else
             {
-                Console.WriteLine(string.Format("Key: {0}\nValue:{1}", varName, variables[varName]));
-            }
-            */
-            
-            var currentDirectory = Directory.GetCurrentDirectory();
+                // Failed to parse options.
+                CleanExit(ExitCodes.InvalidArguments);
+            }            
 
             var desktopDirectory = @"C:\Users\Furinax\Desktop";
 
-            if(Directory.Exists(desktopDirectory + "/.buildbot"))
+            if (Directory.Exists(desktopDirectory + "/.buildbot"))
             {
                 var buildFiles = Directory.GetFiles(desktopDirectory + Path.DirectorySeparatorChar + ".buildbot", "*.cs");
 
-                foreach(var buildFilePath in buildFiles)
+                foreach (var buildFilePath in buildFiles)
                 {
-                    Console.WriteLine(buildFilePath);
-
                     var compiledBuildTasks = LoadTaskFromScript(buildFilePath);
 
-                    foreach(var buildTask in compiledBuildTasks)
+                    if (compiledBuildTasks == null || compiledBuildTasks.Count <= 0)
+                    {
+                        // We get a null collection when nothing succeeded.
+                        CleanExit(ExitCodes.NoBuildScriptsFound);
+                    }
+
+                    foreach (var buildTask in compiledBuildTasks)
                     {
                         Console.WriteLine(buildTask.Help);
-                    }                    
+                    }
                 }
             }
 
             Cleanup();
         }
 
+        private static void CleanExit(ExitCodes code)
+        {
+            Cleanup();
+
+            // Clear a line for neatness.
+            Console.WriteLine();
+
+            // Write out our reson.
+            Console.WriteLine(string.Format("Exiting due to error: {0}", Regex.Replace(code.ToString(), @"(\B[A-Z]+?(?=[A-Z][^A-Z])|\B[A-Z]+?(?=[^A-Z]))", " $1")));
+
+            // Exit.
+            Environment.Exit((int)code);
+        }
+
         private static void Cleanup()
         {
-            foreach(var ms in GeneratedAssemblies)
+            foreach (var ms in GeneratedAssemblies)
             {
                 ms.Dispose();
             }
@@ -83,18 +222,20 @@ namespace BuildBot
         /// </returns>
         private static List<AbstractBuildTask> LoadTaskFromScript(string taskScriptPath)
         {
+            WriteTitleToConsole("Processing Build Script");
+
             // Exhaustively verify that the file exists, is readable and is not
             // an empty file.
             Debug.Assert(!string.IsNullOrEmpty(taskScriptPath) && !string.IsNullOrWhiteSpace(taskScriptPath), "Build task script path is null, empty or whitespace.");
 
-            if(string.IsNullOrEmpty(taskScriptPath) || string.IsNullOrWhiteSpace(taskScriptPath))
+            if (string.IsNullOrEmpty(taskScriptPath) || string.IsNullOrWhiteSpace(taskScriptPath))
             {
-                throw new ArgumentException( "Build task script path is null, empty or whitespace.", nameof(taskScriptPath));
+                throw new ArgumentException("Build task script path is null, empty or whitespace.", nameof(taskScriptPath));
             }
 
             Debug.Assert(File.Exists(taskScriptPath), "Build task script path points to non-existent file.");
 
-            if(!File.Exists(taskScriptPath))
+            if (!File.Exists(taskScriptPath))
             {
                 throw new ArgumentException("Build task script path points to non-existent file.");
             }
@@ -105,9 +246,9 @@ namespace BuildBot
 
             Debug.Assert(!string.IsNullOrEmpty(scriptContents) && !string.IsNullOrWhiteSpace(scriptContents), "Build task script contents are null, empty or whitespace.");
 
-            if(string.IsNullOrEmpty(scriptContents) || string.IsNullOrWhiteSpace(scriptContents))
+            if (string.IsNullOrEmpty(scriptContents) || string.IsNullOrWhiteSpace(scriptContents))
             {
-                throw new ArgumentException( "Build task script contents are null, empty or whitespace.", nameof(taskScriptPath));
+                throw new ArgumentException("Build task script contents are null, empty or whitespace.", nameof(taskScriptPath));
             }
 
             // Setup syntax parse options for C#.
@@ -115,13 +256,13 @@ namespace BuildBot
             parseOptions = parseOptions.WithLanguageVersion(LanguageVersion.CSharp6);
             parseOptions = parseOptions.WithDocumentationMode(DocumentationMode.None);
             parseOptions = parseOptions.WithKind(SourceCodeKind.Regular);
-            
+
             // Parse text into syntax tree.
             SyntaxTree jobSyntaxTree = CSharpSyntaxTree.ParseText(scriptContents, parseOptions);
 
             // Generate a random file name for the assembly we're about to produce.
             string generatedAssemblyName = Path.GetRandomFileName();
-            
+
             // Get the directory of a core assembly. We need this directory to
             // build out our platform specific reference to mscorlib. mscorlib
             // and the private mscorlib must be supplied as references for
@@ -129,26 +270,26 @@ namespace BuildBot
             // mscorlib is discovered via enumerataing assemblies referenced by
             // this executing binary.
             var dd = typeof(Enumerable).GetTypeInfo().Assembly.Location;
-            var coreDir = Directory.GetParent(dd);            
-            
+            var coreDir = Directory.GetParent(dd);
+
             List<MetadataReference> references = new List<MetadataReference>
             {   
                 // Here we get the path to the mscorlib and private mscorlib
                 // libraries that are required for compilation to succeed.
                 MetadataReference.CreateFromFile(coreDir.FullName + Path.DirectorySeparatorChar + "mscorlib.dll"),
-                MetadataReference.CreateFromFile(typeof(object).GetTypeInfo().Assembly.Location)           
+                MetadataReference.CreateFromFile(typeof(object).GetTypeInfo().Assembly.Location)
             };
 
             // Enumerate all assemblies referenced by this executing assembly
             // and provide them as references to the build script we're about to
             // compile.
             var referencedAssemblies = Assembly.GetEntryAssembly().GetReferencedAssemblies();
-            foreach(var referencedAssembly in referencedAssemblies)
+            foreach (var referencedAssembly in referencedAssemblies)
             {
-                var loadedAssembly = Assembly.Load(referencedAssembly);   
+                var loadedAssembly = Assembly.Load(referencedAssembly);
 
-                references.Add(MetadataReference.CreateFromFile(loadedAssembly.Location)); 
-                
+                references.Add(MetadataReference.CreateFromFile(loadedAssembly.Location));
+
                 /* For debugging, to try to list explicit platform compat. Flaky.
                 try
                 {
@@ -159,51 +300,51 @@ namespace BuildBot
                     Console.WriteLine(attribute.FrameworkDisplayName);
                 }
                 catch{}
-                */                
+                */
             }
-            
+
             // Initialize compilation arguments for the build script we're about
             // to compile.
             var op = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
             op = op.WithAssemblyIdentityComparer(DesktopAssemblyIdentityComparer.Default);
-            op = op.WithGeneralDiagnosticOption(ReportDiagnostic.Warn);            
-            
+            op = op.WithGeneralDiagnosticOption(ReportDiagnostic.Warn);
+
             // Initialize the compilation with our options, references and the
             // already parsed syntax tree of the build script.
             CSharpCompilation compilation = CSharpCompilation.Create(
                 generatedAssemblyName,
                 syntaxTrees: new[] { jobSyntaxTree },
                 references: references,
-                options: op);           
-            
+                options: op);
+
             // Compile and emit new assembly into memory.
             var ms = new MemoryStream();
             EmitResult result = compilation.Emit(ms);
 
-            if(result.Success)
+            if (result.Success)
             {
                 // Store the in-memory assembly until this program exits.
                 GeneratedAssemblies.Add(ms);
 
                 // Get an Assembly structure from the data in memory.
-                ms.Seek(0, SeekOrigin.Begin);                    
-                AssemblyLoadContext loadCtx = AssemblyLoadContext.Default;                
+                ms.Seek(0, SeekOrigin.Begin);
+                AssemblyLoadContext loadCtx = AssemblyLoadContext.Default;
                 Assembly assembly = loadCtx.LoadFromStream(ms);
 
                 // Enumerate types exported from the assembly. Presently not used.
-                var exportedTypes = assembly.ExportedTypes;                
-                foreach(var xp in exportedTypes)
+                var exportedTypes = assembly.ExportedTypes;
+                foreach (var xp in exportedTypes)
                 {
-                    Console.WriteLine(string.Format("Build script exports type: {0}" ,xp.Name));
+                    Console.WriteLine(string.Format("Build script exports type: {0}", xp.Name));
                 }
 
                 // Filter exported types so we only pull types extending from AbstractBuildTask.                
-                var filteredExports = exportedTypes.Where(x => x.Name != typeof(AbstractBuildTask).Name);                
+                var filteredExports = exportedTypes.Where(x => x.Name != typeof(AbstractBuildTask).Name);
                 Console.WriteLine(string.Format("Number of exported build objects: {0}", filteredExports.Count()));
 
                 // Ensure that we have at least one exported build task.
                 Debug.Assert(filteredExports.Count() > 0, "Script either does not export any AbstractBuildTask objects. Build scripts should export one or more AbstractBuildTask objects.");
-                if(filteredExports.Count() <= 0)
+                if (filteredExports.Count() <= 0)
                 {
                     throw new ArgumentException("Script either does not export any AbstractBuildTask objects. Build scripts should export one or more AbstractBuildTask objects.", nameof(taskScriptPath));
                 }
@@ -211,7 +352,7 @@ namespace BuildBot
                 var filteredExportsList = filteredExports.ToList();
                 List<AbstractBuildTask> buildTasks = new List<AbstractBuildTask>();
 
-                foreach(var entry in filteredExportsList)
+                foreach (var entry in filteredExportsList)
                 {
                     AbstractBuildTask typedExport = (AbstractBuildTask)Activator.CreateInstance(entry);
                     buildTasks.Add(typedExport);
@@ -223,19 +364,60 @@ namespace BuildBot
             {
                 ms.Dispose();
 
-                Console.WriteLine("Failed");
+                Console.WriteLine(string.Format("Failed to compile build script: {0}.", taskScriptPath));
 
-                IEnumerable<Diagnostic> failures = result.Diagnostics.Where(diagnostic => 
-                        diagnostic.IsWarningAsError || 
+                IEnumerable<Diagnostic> failures = result.Diagnostics.Where(diagnostic =>
+                        diagnostic.IsWarningAsError ||
                         diagnostic.Severity == DiagnosticSeverity.Error);
 
                 foreach (Diagnostic diagnostic in failures)
                 {
                     Console.Error.WriteLine("{0}: {1}", diagnostic.Id, diagnostic.GetMessage());
                 }
+
+                CleanExit(ExitCodes.ScriptCompilationFailure);
             }
 
+            Console.WriteLine("null");
+
             return null;
+        }
+
+        /// <summary>
+        /// Writes the given string as a centered title to the console.
+        /// </summary>
+        /// <param name="title">
+        /// The title to write.
+        /// </param>
+        private static void WriteTitleToConsole(string title)
+        {
+            // Write empty line just for neatness;
+            Console.WriteLine();
+
+            if (string.IsNullOrEmpty(title) || string.IsNullOrWhiteSpace(title))
+            {
+                title = string.Empty;
+            }
+
+            FillConsoleWidth('~');
+
+            Console.SetCursorPosition((Console.WindowWidth - title.Length) / 2, Console.CursorTop);
+
+            Console.WriteLine(title);
+
+            FillConsoleWidth('~');
+        }
+
+        /// <summary>
+        /// Fills the width of the console window with the given character.
+        /// </summary>
+        /// <param name="c">
+        /// The char to fill the width of the console with.
+        /// </param>
+        private static void FillConsoleWidth(char c)
+        {
+            var s = new string(c, Console.WindowWidth);
+            Console.WriteLine(s);
         }
     }
 }
