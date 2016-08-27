@@ -1,4 +1,25 @@
-﻿using System;
+﻿/// The MIT License (MIT) Copyright (c) 2016 Jesse Nicholson 
+/// 
+/// Permission is hereby granted, free of charge, to any person obtaining a 
+/// copy of this software and associated documentation files (the 
+/// "Software"), to deal in the Software without restriction, including 
+/// without limitation the rights to use, copy, modify, merge, publish, 
+/// distribute, sublicense, and/or sell copies of the Software, and to 
+/// permit persons to whom the Software is furnished to do so, subject to 
+/// the following conditions: 
+/// 
+/// The above copyright notice and this permission notice shall be included 
+/// in all copies or substantial portions of the Software. 
+/// 
+/// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+/// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF 
+/// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+/// IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY 
+/// CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+/// TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+/// SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+
+using System;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -27,7 +48,7 @@ namespace BuildBot
         /// executed without issue.
         /// </summary>
         Success = 0,
-        
+
         /// <summary>
         /// Invald arguments were supplied to BuildBot.
         /// </summary>
@@ -46,7 +67,12 @@ namespace BuildBot
         /// <summary>
         /// An error occurred when attempting to execute a build script.
         /// </summary>
-        ScriptExecutionError
+        ScriptExecutionError,
+
+        /// <summary>
+        /// The supplied project directory does not exist.
+        /// </summary>
+        ProjectDirectoryDoesNotExist
     }
 
     /// <summary>
@@ -136,13 +162,13 @@ namespace BuildBot
                 // Build correct base project directory.
                 var fullProjectPath = Path.GetFullPath(options.ProjectDirectory).ConvertToHostOsPath();
 
-                if(!fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
+                if (!fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
                 {
                     Console.WriteLine("Unrooted project path supplied.");
                     fullProjectDirectory = (Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + options.ProjectDirectory);
                 }
                 else
-                {                    
+                {
                     Console.WriteLine("Rooted project path supplied.");
                     fullProjectDirectory = options.ProjectDirectory.ConvertToHostOsPath();
                 }
@@ -156,29 +182,74 @@ namespace BuildBot
             {
                 // Failed to parse options.
                 CleanExit(ExitCodes.InvalidArguments);
-            }            
+            }
 
-            var desktopDirectory = @"C:\Users\Furinax\Desktop";
-
-            if (Directory.Exists(desktopDirectory + "/.buildbot"))
+            if (Directory.Exists(fullProjectDirectory))
             {
-                var buildFiles = Directory.GetFiles(desktopDirectory + Path.DirectorySeparatorChar + ".buildbot", "*.cs");
+                // Find all build bot directories, recursively.
+                var buildBotDirs = Directory.GetDirectories(fullProjectDirectory, ".buildbot", SearchOption.AllDirectories);
 
-                foreach (var buildFilePath in buildFiles)
+                var pendingTasks = new Dictionary<string, AbstractBuildTask>();
+                var completedTasks = new HashSet<string>();
+
+                foreach (var buildDirPath in buildBotDirs)
                 {
-                    var compiledBuildTasks = LoadTaskFromScript(buildFilePath);
-
-                    if (compiledBuildTasks == null || compiledBuildTasks.Count <= 0)
+                    Console.WriteLine(buildDirPath);
+                    foreach (var buildScriptPath in Directory.GetFiles(buildDirPath, "*.cs", SearchOption.AllDirectories))
                     {
-                        // We get a null collection when nothing succeeded.
-                        CleanExit(ExitCodes.NoBuildScriptsFound);
-                    }
+                        Console.WriteLine(buildScriptPath);
 
-                    foreach (var buildTask in compiledBuildTasks)
-                    {
-                        Console.WriteLine(buildTask.Help);
+                        var compiledBuildTasks = LoadTaskFromScript(buildScriptPath);
+
+                        if (compiledBuildTasks == null || compiledBuildTasks.Count <= 0)
+                        {
+                            // We get a null collection when nothing succeeded.
+                            CleanExit(ExitCodes.ScriptCompilationFailure);
+                        }
+
+                        // Rebuild the arch and config flags from the options.
+                        var archStringList = options.Arch.Select(x => x.ToString()).ToList();
+                        Architecture archFlag = (Architecture)Enum.Parse(typeof(Architecture), string.Join(",", archStringList));
+
+                        var configStringList = options.Configuration.Select(x => x.ToString()).ToList();
+                        BuildConfiguration configFlag = (BuildConfiguration)Enum.Parse(typeof(BuildConfiguration), string.Join(",", configStringList));
+                        //
+
+
+                        foreach (var buildTask in compiledBuildTasks)
+                        {
+                            try
+                            {
+                                // No need to iterate over config and arch flags. Each build
+                                // task is expected to do this internally.
+                                if (!buildTask.Run(configFlag, archFlag))
+                                {
+                                    Console.WriteLine("Failed to execute build task.");
+
+                                    foreach (var err in buildTask.Errors)
+                                    {
+                                        Console.WriteLine(err.Message);
+                                    }
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                Console.WriteLine(e.Message);
+                                Console.WriteLine(e.StackTrace);
+
+                                if (e.InnerException != null)
+                                {
+                                    Console.WriteLine(e.InnerException.Message);
+                                    Console.WriteLine(e.InnerException.StackTrace);
+                                }
+                            }
+                        }
                     }
                 }
+            }
+            else
+            {
+                CleanExit(ExitCodes.ProjectDirectoryDoesNotExist);
             }
 
             Cleanup();
@@ -287,7 +358,17 @@ namespace BuildBot
             {
                 var loadedAssembly = Assembly.Load(referencedAssembly);
 
-                references.Add(MetadataReference.CreateFromFile(loadedAssembly.Location));
+                var mref = MetadataReference.CreateFromFile(loadedAssembly.Location);
+
+                if (loadedAssembly.FullName.Contains("System.Runtime.Extension"))
+                {
+                    // Have to do this to avoid collisions with duplicate type
+                    // definitions between private mscorlib and this assembly.
+                    // XXX TODO - Needs to be solved in a better way?
+                    mref = mref.WithAliases(new List<string>(new[] { "CorPrivate" }));
+                }
+
+                references.Add(mref);
 
                 /* For debugging, to try to list explicit platform compat. Flaky.
                 try
@@ -353,7 +434,7 @@ namespace BuildBot
 
                 foreach (var entry in filteredExportsList)
                 {
-                    AbstractBuildTask typedExport = (AbstractBuildTask)Activator.CreateInstance(entry);
+                    AbstractBuildTask typedExport = (AbstractBuildTask)Activator.CreateInstance(entry, new[] { taskScriptPath.ConvertToHostOsPath() });
                     buildTasks.Add(typedExport);
                 }
 
