@@ -8,7 +8,7 @@
       "outputName": "BuildBot"      
     },
     "dependencies": {      
-      "BuildBotCore": "1.0.0-*",
+      "BuildBotCore": "1.1.0",
       "Microsoft.CodeAnalysis.Common": "1.3.2",
       "Microsoft.CodeAnalysis.CSharp": "1.3.2",
       "Microsoft.NETCore.Runtime.CoreCLR": "1.0.4",

@@ -215,7 +215,6 @@ namespace BuildBot
                         BuildConfiguration configFlag = (BuildConfiguration)Enum.Parse(typeof(BuildConfiguration), string.Join(",", configStringList));
                         //
 
-
                         foreach (var buildTask in compiledBuildTasks)
                         {
                             try
