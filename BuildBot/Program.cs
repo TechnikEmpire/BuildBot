@@ -81,7 +81,7 @@ namespace BuildBot
     public class BuildBotOptions
     {
 
-        [Option('C', "Config", Separator = ',', Required = true,
+        [Option('C', "Config", Separator = ',', Required = true, SetName="Build",
         HelpText = "The build configuration. Valid values are \"Debug\" and \"Release\". Multiple values can be supplied in a list, separated by the ',' character.")]
         public IList<BuildConfiguration> Configuration
         {
@@ -89,7 +89,7 @@ namespace BuildBot
             set;
         }
 
-        [Option('A', "Arch", Separator = ',', Required = true,
+        [Option('A', "Arch", Separator = ',', Required = true, SetName="Build", 
         HelpText = "The target architecture. Valid values are \"x86\" and \"x64\". Multiple values can be supplied in a list, separated by the ',' character.")]
         public IList<Architecture> Arch
         {
@@ -100,6 +100,14 @@ namespace BuildBot
         [Option('D', "ProjectDir", Required = true,
         HelpText = "The project directory to initiate building from. This is the base directory that will be recursively scanned for .buildbot script directories.")]
         public string ProjectDirectory
+        {
+            get;
+            set;
+        }
+
+        [Option('X', "CleanAll", Required = true, SetName="Clean",
+        HelpText = "Perform the Clean operation on all of the project's build task. Be warned: clean operations delete things.")]        
+        public bool CleanAll
         {
             get;
             set;
@@ -189,8 +197,8 @@ namespace BuildBot
                 // Find all build bot directories, recursively.
                 var buildBotDirs = Directory.GetDirectories(fullProjectDirectory, ".buildbot", SearchOption.AllDirectories);
 
-                var pendingTasks = new Dictionary<string, AbstractBuildTask>();
-                var completedTasks = new HashSet<string>();
+                var pendingTasks = new List<AbstractBuildTask>();
+                //var completedTasks = new HashSet<string>();
 
                 foreach (var buildDirPath in buildBotDirs)
                 {
@@ -207,42 +215,127 @@ namespace BuildBot
                             CleanExit(ExitCodes.ScriptCompilationFailure);
                         }
 
-                        // Rebuild the arch and config flags from the options.
-                        var archStringList = options.Arch.Select(x => x.ToString()).ToList();
-                        Architecture archFlag = (Architecture)Enum.Parse(typeof(Architecture), string.Join(",", archStringList));
-
-                        var configStringList = options.Configuration.Select(x => x.ToString()).ToList();
-                        BuildConfiguration configFlag = (BuildConfiguration)Enum.Parse(typeof(BuildConfiguration), string.Join(",", configStringList));
-                        //
-
                         foreach (var buildTask in compiledBuildTasks)
                         {
-                            try
-                            {
-                                // No need to iterate over config and arch flags. Each build
-                                // task is expected to do this internally.
-                                if (!buildTask.Run(configFlag, archFlag))
-                                {
-                                    Console.WriteLine("Failed to execute build task.");
+                            pendingTasks.Add(buildTask);
+                        }
+                    }
+                }
 
-                                    foreach (var err in buildTask.Errors)
-                                    {
-                                        Console.WriteLine(err.Message);
-                                    }
+                if(pendingTasks.Count <= 0)
+                {
+                    CleanExit(ExitCodes.NoBuildScriptsFound);
+                }                
+
+                WriteTitleToConsole("Resolving Task Dependency Order");
+
+                // Sort by lease dependencies to greatest.
+                //pendingTasks.Sort((x, y) => x.TaskDependencies.Count.CompareTo(y.TaskDependencies.Count));
+
+                pendingTasks.Sort(delegate (AbstractBuildTask x, AbstractBuildTask y)
+                {
+                    if (x.TaskDependencies.Contains(y.GUID))
+                    {
+                        Console.WriteLine(string.Format("Task {0} depends on task {1}.", x.TaskFriendlyName, y.TaskFriendlyName));
+                        return 1;
+                    }
+                    else if (y.TaskDependencies.Contains(x.GUID))
+                    {
+                        Console.WriteLine(string.Format("Task {0} depends on task {1}.", y.TaskFriendlyName, x.TaskFriendlyName));
+                        return -1;
+                    }
+
+                    return 0;
+                });
+
+                if(options.CleanAll)
+                {
+                    // First try to clean all.
+                    foreach (var buildTask in pendingTasks)
+                    {
+                        try
+                        {
+                            WriteTitleToConsole(string.Format("Running Build Task Clean: {0}", buildTask.TaskFriendlyName));
+
+                            if (!buildTask.Clean())
+                            {
+                                Console.WriteLine("Failed to execute build task clean process.");
+
+                                foreach (var err in buildTask.Errors)
+                                {
+                                    Console.WriteLine(err.Message);
                                 }
+
+                                Cleanup();
+                                CleanExit(ExitCodes.ScriptExecutionError);
                             }
-                            catch (Exception e)
+                            else
                             {
-                                Console.WriteLine(e.Message);
-                                Console.WriteLine(e.StackTrace);
-
-                                if (e.InnerException != null)
-                                {
-                                    Console.WriteLine(e.InnerException.Message);
-                                    Console.WriteLine(e.InnerException.StackTrace);
-                                }
+                                Console.WriteLine("Clean process successful.");
                             }
                         }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e.Message);
+                            Console.WriteLine(e.StackTrace);
+
+                            if (e.InnerException != null)
+                            {
+                                Console.WriteLine(e.InnerException.Message);
+                                Console.WriteLine(e.InnerException.StackTrace);
+                            }
+
+                            Cleanup();
+                            CleanExit(ExitCodes.ScriptExecutionError);
+                        }
+                    }
+
+                    CleanExit(ExitCodes.Success);
+                }                
+
+                // Rebuild the arch and config flags from the options.
+                var archStringList = options.Arch.Select(x => x.ToString()).ToList();
+                Architecture archFlag = (Architecture)Enum.Parse(typeof(Architecture), string.Join(",", archStringList));
+
+                var configStringList = options.Configuration.Select(x => x.ToString()).ToList();
+                BuildConfiguration configFlag = (BuildConfiguration)Enum.Parse(typeof(BuildConfiguration), string.Join(",", configStringList));
+                //
+
+                // FYI, no need to iterate over config and arch flags when
+                // building. Each build task is expected to do this internally.
+
+                foreach (var buildTask in pendingTasks)
+                {
+                    try
+                    {
+                        WriteTitleToConsole(string.Format("Running Build Task: {0}", buildTask.TaskFriendlyName));
+
+                        if (!buildTask.Run(configFlag, archFlag))
+                        {
+                            Console.WriteLine("Failed to execute build task.");
+
+                            foreach (var err in buildTask.Errors)
+                            {
+                                Console.WriteLine(err.Message);
+                            }
+
+                            Cleanup();
+                            CleanExit(ExitCodes.ScriptExecutionError);
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e.Message);
+                        Console.WriteLine(e.StackTrace);
+
+                        if (e.InnerException != null)
+                        {
+                            Console.WriteLine(e.InnerException.Message);
+                            Console.WriteLine(e.InnerException.StackTrace);
+                        }
+
+                        Cleanup();
+                        CleanExit(ExitCodes.ScriptExecutionError);
                     }
                 }
             }
@@ -261,8 +354,11 @@ namespace BuildBot
             // Clear a line for neatness.
             Console.WriteLine();
 
-            // Write out our reson.
-            Console.WriteLine(string.Format("Exiting due to error: {0}", Regex.Replace(code.ToString(), @"(\B[A-Z]+?(?=[A-Z][^A-Z])|\B[A-Z]+?(?=[^A-Z]))", " $1")));
+            if(code != ExitCodes.Success)
+            {
+                // Write out our reson.
+                Console.WriteLine(string.Format("Exiting due to error: {0}", Regex.Replace(code.ToString(), @"(\B[A-Z]+?(?=[A-Z][^A-Z])|\B[A-Z]+?(?=[^A-Z]))", " $1")));
+            }            
 
             // Exit.
             Environment.Exit((int)code);
@@ -291,7 +387,7 @@ namespace BuildBot
         /// </returns>
         private static List<AbstractBuildTask> LoadTaskFromScript(string taskScriptPath)
         {
-            WriteTitleToConsole("Processing Build Script");
+            WriteTitleToConsole("Loading & Parsing Build Script");
 
             // Exhaustively verify that the file exists, is readable and is not
             // an empty file.
