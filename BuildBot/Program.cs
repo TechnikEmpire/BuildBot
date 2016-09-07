@@ -81,7 +81,7 @@ namespace BuildBot
     public class BuildBotOptions
     {
 
-        [Option('C', "Config", Separator = ',', Required = true, SetName="Build",
+        [Option('C', "Config", Separator = ',', Required = true, SetName = "Build",
         HelpText = "The build configuration. Valid values are \"Debug\" and \"Release\". Multiple values can be supplied in a list, separated by the ',' character.")]
         public IList<BuildConfiguration> Configuration
         {
@@ -89,7 +89,7 @@ namespace BuildBot
             set;
         }
 
-        [Option('A', "Arch", Separator = ',', Required = true, SetName="Build", 
+        [Option('A', "Arch", Separator = ',', Required = true, SetName = "Build",
         HelpText = "The target architecture. Valid values are \"x86\" and \"x64\". Multiple values can be supplied in a list, separated by the ',' character.")]
         public IList<Architecture> Arch
         {
@@ -105,8 +105,8 @@ namespace BuildBot
             set;
         }
 
-        [Option('X', "CleanAll", Required = true, SetName="Clean",
-        HelpText = "Perform the Clean operation on all of the project's build task. Be warned: clean operations delete things.")]        
+        [Option('X', "CleanAll", Required = true, SetName = "Clean",
+        HelpText = "Perform the Clean operation on all of the project's build task. Be warned: clean operations delete things.")]
         public bool CleanAll
         {
             get;
@@ -222,10 +222,10 @@ namespace BuildBot
                     }
                 }
 
-                if(pendingTasks.Count <= 0)
+                if (pendingTasks.Count <= 0)
                 {
                     CleanExit(ExitCodes.NoBuildScriptsFound);
-                }                
+                }
 
                 WriteTitleToConsole("Resolving Task Dependency Order");
 
@@ -248,7 +248,7 @@ namespace BuildBot
                     return 0;
                 });
 
-                if(options.CleanAll)
+                if (options.CleanAll)
                 {
                     // First try to clean all.
                     foreach (var buildTask in pendingTasks)
@@ -291,7 +291,7 @@ namespace BuildBot
                     }
 
                     CleanExit(ExitCodes.Success);
-                }                
+                }
 
                 // Rebuild the arch and config flags from the options.
                 var archStringList = options.Arch.Select(x => x.ToString()).ToList();
@@ -354,11 +354,11 @@ namespace BuildBot
             // Clear a line for neatness.
             Console.WriteLine();
 
-            if(code != ExitCodes.Success)
+            if (code != ExitCodes.Success)
             {
                 // Write out our reson.
                 Console.WriteLine(string.Format("Exiting due to error: {0}", Regex.Replace(code.ToString(), @"(\B[A-Z]+?(?=[A-Z][^A-Z])|\B[A-Z]+?(?=[^A-Z]))", " $1")));
-            }            
+            }
 
             // Exit.
             Environment.Exit((int)code);
@@ -437,6 +437,8 @@ namespace BuildBot
             var dd = typeof(Enumerable).GetTypeInfo().Assembly.Location;
             var coreDir = Directory.GetParent(dd);
 
+            HashSet<string> allRefs = new HashSet<string>();
+
             List<MetadataReference> references = new List<MetadataReference>
             {   
                 // Here we get the path to the mscorlib and private mscorlib
@@ -448,14 +450,13 @@ namespace BuildBot
             // Enumerate all assemblies referenced by this executing assembly
             // and provide them as references to the build script we're about to
             // compile.
-            var referencedAssemblies = Assembly.GetEntryAssembly().GetReferencedAssemblies();
+            var referencedAssemblies = RecursivelyGetReferencedAssemblies(Assembly.GetEntryAssembly());
+
             foreach (var referencedAssembly in referencedAssemblies)
             {
-                var loadedAssembly = Assembly.Load(referencedAssembly);
+                var mref = MetadataReference.CreateFromFile(referencedAssembly.Location);
 
-                var mref = MetadataReference.CreateFromFile(loadedAssembly.Location);
-
-                if (loadedAssembly.FullName.Contains("System.Runtime.Extension"))
+                if (referencedAssembly.FullName.Contains("System.Runtime.Extension"))
                 {
                     // Have to do this to avoid collisions with duplicate type
                     // definitions between private mscorlib and this assembly.
@@ -463,7 +464,11 @@ namespace BuildBot
                     mref = mref.WithAliases(new List<string>(new[] { "CorPrivate" }));
                 }
 
-                references.Add(mref);
+                if (!allRefs.Contains(mref.Display))
+                {
+                    references.Add(mref);
+                    allRefs.Add(mref.Display);
+                }
 
                 /* For debugging, to try to list explicit platform compat. Flaky.
                 try
@@ -556,6 +561,59 @@ namespace BuildBot
             Console.WriteLine("null");
 
             return null;
+        }
+
+        /// <summary>
+        /// Gets every assembly that the supplied assembly connects to, directly
+        /// and indirectly.
+        /// </summary>
+        /// <param name="assembly">
+        /// The assembly from which to pull all references.
+        /// </param>
+        /// <param name="collected">
+        /// An optional dictionary to collect all unique references into. If not
+        /// supplied, will be created. Only used to ensure a final, unique list.
+        /// </param>
+        /// <returns>
+        /// A unique list containing all recursively referenced assemblies.
+        /// </returns>
+        private static List<Assembly> RecursivelyGetReferencedAssemblies(Assembly assembly, Dictionary<string, Assembly> collected = null)
+        {
+            if (collected == null)
+            {
+                collected = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (!collected.ContainsKey(assembly.FullName))
+            {
+                collected.Add(assembly.FullName, assembly);
+            }
+
+            var reffed = assembly.GetReferencedAssemblies();
+
+            foreach (var entry in reffed)
+            {
+                var loaded = Assembly.Load(entry);
+
+                if (collected.ContainsKey(loaded.FullName))
+                {
+                    continue;
+                }
+
+                collected.Add(loaded.FullName, loaded);
+
+                var subRes = RecursivelyGetReferencedAssemblies(loaded, collected);
+
+                foreach (var subEntry in subRes)
+                {
+                    if (!collected.ContainsKey(subEntry.FullName))
+                    {
+                        collected.Add(subEntry.FullName, subEntry);
+                    }
+                }
+            }
+
+            return collected.Values.ToList();
         }
 
         /// <summary>
