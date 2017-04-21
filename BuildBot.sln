@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "BuildBot", "BuildBot\BuildBot.xproj", "{F15C3CC7-C01F-4BC8-A1CB-7C4EBCEEE8BF}"
+Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "BuildBot", "BuildBot\BuildBot.csproj", "{F15C3CC7-C01F-4BC8-A1CB-7C4EBCEEE8BF}"
 EndProject
-Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "BuildBotCore", "BuildBotCore\BuildBotCore.xproj", "{D5B33412-6D35-4F7D-B7DA-1150B5C4BAAC}"
+Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "BuildBotCore", "BuildBotCore\BuildBotCore.csproj", "{D5B33412-6D35-4F7D-B7DA-1150B5C4BAAC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

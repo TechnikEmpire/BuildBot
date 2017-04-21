@@ -172,12 +172,12 @@ namespace BuildBot
 
                 if (!fullProjectPath.Equals(options.ProjectDirectory, StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine("Unrooted project path supplied.");
-                    fullProjectDirectory = (Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + options.ProjectDirectory);
+                    Console.WriteLine("Non-absolute project path supplied.");
+                    fullProjectDirectory = (Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + options.ProjectDirectory);                    
                 }
                 else
                 {
-                    Console.WriteLine("Rooted project path supplied.");
+                    Console.WriteLine("Absolute project path supplied.");
                     fullProjectDirectory = options.ProjectDirectory.ConvertToHostOsPath();
                 }
 
