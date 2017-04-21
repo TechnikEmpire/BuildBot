@@ -43,11 +43,11 @@
   </ItemGroup>
 
   <ItemGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <Compile Include="Abstractions;Extensions;Services" Exclude="bin\**;obj\**;**\*.xproj;packages\**" />
+    
   </ItemGroup>
 
   <ItemGroup Condition=" '$(Configuration)' == 'Release' ">
-    <Compile Include="Abstractions;Extensions;Services" Exclude="bin\**;obj\**;**\*.xproj;packages\**" />
+    
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFramework)' == 'netcoreapp1.0' ">
