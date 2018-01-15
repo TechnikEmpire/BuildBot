@@ -1,3 +1,6 @@
+## Notice
+This project is/was a WIP that I created specially for a now retired C++ project. While this project does begin the foundations of a build tool, it's incomplete and probably will be archived soon.
+
 # BuildBot
 Cross platform, simple build system in pure C# based on .NET core app &amp; standard library.
 
